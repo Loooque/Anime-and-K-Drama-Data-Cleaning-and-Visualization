@@ -1,0 +1,184 @@
+---
+title: "Final Project"
+author: "Luke Andrade"
+date: '2022-05-05'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library('tidyverse')
+library('here')
+library('janitor')
+library('lubridate')
+library('gridExtra')
+```
+
+
+```{r data acquisition}
+data1 <- read.csv('mal_top2000_anime.csv')
+data2 <- read.csv('top100_kdrama.csv')
+```
+Both data sets used were found and downloaded on Kaggle. They seemed interesting to me as I enjoy both anime and K-dramas and they also seemed like they could use some cleaning.
+
+```{r anime data}
+glimpse(data1)
+```
+This data set is the data on the top 2000 anime. We can see that the names can be cleaned up, X is an irrelevant variable, the air date needs to be reformatted, and the studio, genre, and theme variables need to be fixed as they appear to be a list that was converted to a string.
+
+
+```{r anime data: selecting variables and cleaning names}
+animedata <- data1 %>%
+  select(-X) %>%
+  rename('Themes' = 'Theme.s.',
+         'Rank' = 'Score.Rank',
+         'Popularity' = 'Popularity.Rank',
+         'Air_Date' = 'Air.Date',
+         'Num_Episodes' = 'Num..of.episodes',
+         'Theme' = 'Theme.s.',
+         'Genre' = 'Genres')
+  
+```
+First I simply removed the X variable and renamed the other variables to look cleaner and suit my taste as I simply don't like having periods in variable name but would rather have underscores.
+
+```{r anime data: cleaning data}
+animedata <- animedata %>%
+  mutate(Air_Date = str_extract(Air_Date, '[:alpha:]+ [:digit:]+, [:digit:]+') %>%
+           mdy(),
+         Studio = as.list(str_extract_all(Studio, "[:alpha:][^\\[\\],']+")),
+         Genre = as.list(str_extract_all(Genre, "[:alpha:][^\\[\\],']+")),
+         Theme = as.list(str_extract_all(Theme, "[:alpha:][^\\[\\],']+")))
+```
+Next I used regular expressions to extract the relevant information from previously mentioned character variables. Air_Date is now in a cleaner date format and Studio, Genre, and Theme have been converted to lists. 
+
+```{r anime data: rearranging the variables}
+animedata <- animedata %>%
+  select(c('Rank', 'Name', 'Score', 'Popularity', 'Air_Date', 'Num_Episodes', 'Studio','Genre', 'Theme', 'Demographic'))
+```
+Next I rearranged the variables so they would be in the order that makes most sense to me when reading the data.
+
+```{r anime data: splitting list variables}
+animedataunnested <- animedata %>%
+  unnest_longer(Studio) %>%
+  unnest_longer(Genre) %>%
+  unnest_longer(Theme)
+```
+Working with list variables isn't optimal so I used the unnest_longer function to create additional entries for each value in the lists. However this did cause some issues later which is why I decided to create a new data frame.
+
+```{r anime data (unnested): export to csv, include=FALSE}
+write.csv(animedataunnested, here('top2000animeunnested.csv'))
+```
+
+
+```{r k-drama data}
+glimpse(data2)
+```
+This data set is data on the top 100 k-dramas. The term k-drama generally refers to Korean TV shows which is why Drama is listed as one of the Genres. Here I must change the variable names, remove some irrelevant variables, reformat the air date, reformat the duration, and change the rank from a character to an integer.
+
+```{r k-drama data: selecting variables and cleaning names}
+kdramadata <- data2 %>%
+  select(-c('Year.of.release', 'Aired.On', 'Synopsis', 'Cast','Tags')) %>%
+  rename('Air_Date' = 'Aired.Date',
+         'Num_Episodes' = 'Number.of.Episode',
+         'Content_Rating' = 'Content.Rating')
+```
+First I removed some variables and renamed the variables. Again avoiding any periods.
+
+```{r k-drama data: cleaning variables}
+kdramadata <- kdramadata %>%
+  mutate(Air_Date = str_extract(Air_Date, '[:alpha:]+ [:digit:]+, [:digit:]+') %>% mdy(),
+         Rank = str_extract(Rank, '[:digit:]+') %>% parse_number(),
+         hr = str_extract(Duration, '[:digit:]+ hr.') %>% str_extract('[:digit:]+') %>% parse_number(),
+         hr = case_when(
+           is.na(hr) == TRUE ~ 0,
+           TRUE ~ hr),
+         min = str_extract(Duration, '[:digit:]+ min.') %>% str_extract('[:digit:]+') %>% parse_number(),
+         Duration = hr * 60 + min) %>%
+  select(-c(hr, min))
+```
+Next I cleaned the data by using regular expressions to clean the Air_Data, Rank, and Duration variables. I changed the Duration variable so that it is an integer in the form of total minutes.
+
+```{r k-drama data: rearranging the variables}
+kdramadata <- kdramadata %>%
+  select(c('Rank', 'Name', 'Rating', 'Air_Date', 'Num_Episodes', 'Genre', 'Duration', 'Network', 'Content_Rating'))
+```
+I rearranged the variables for this data frame as well and kept it very similar to the previous data set.
+
+```{r k-drama data: splitting list variables}
+kdramadataunnested <- kdramadata %>%
+  mutate(Genre = str_split(Genre, ',')) %>%
+  unnest_longer(Genre) %>%
+  mutate(Genre = str_trim(Genre))
+```
+I used the unnest_longer function on the Genre variable to add multiple entries for each TV shows depending on the amount of Genres.
+
+```{r k-drama data (unnested): export to csv, include=FALSE}
+write.csv(kdramadataunnested, here('top100kdramasunnested.csv'))
+```
+
+```{r creating kdramadata genre plot}
+kdramagenreplot <- kdramadataunnested %>%
+  group_by(Genre) %>%
+  summarize(Genre_Percent = n() / 100) %>%
+  mutate(Genre = fct_reorder(Genre, desc(Genre_Percent))) %>%
+  head(10) %>%
+  ggplot(aes(Genre, Genre_Percent)) +
+  geom_col(fill = 'steelblue2') +
+  ggtitle('Most Common Genres of The Top 100 Korean TV Shows') +
+  ylab('Percentage') +
+  theme_bw() +
+  theme(axis.title.x = element_blank()) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme(plot.title = element_text(hjust = 0.5))
+  
+```
+I was curious about which Genres occurred the most frequently in the top 100 K-Dramas so I decided to graph the percent of the top 100 that were of each genre. Since each K-Drama could be of multiple genres, the percentages here don't add up to 1. The graph will be plotted with another one later.
+
+```{r creating animedata genre plot}
+animegenreplot <- animedata %>%
+  unnest_longer(Genre) %>%
+  group_by(Genre) %>%
+  summarize(Genre_Percent = n() / 2000) %>%
+  mutate(Genre = fct_reorder(Genre, desc(Genre_Percent))) %>%
+  head(10) %>%
+  ggplot(aes(Genre, Genre_Percent)) +
+  geom_col(fill = 'firebrick2') +
+  ggtitle('Most Commmon Genres of the Top 2000 Anime') +
+  ylab('Percentage') +
+  theme_bw() +
+  theme(axis.title.x = element_blank()) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+I created the same graph I did for the K-Dramas but for anime. Due to the unnest_longer function, issues were created since each many anime that had multiple genres, studios, and themes had many duplicate values for genre since they were duplicated for each additional studio and theme as well.
+
+```{r issues from unnesting all variables}
+animedataunnested %>%
+  group_by(Genre) %>%
+  summarize(Genre_Percent = n() / 2000) %>%
+  mutate(Genre = fct_reorder(Genre, desc(Genre_Percent))) %>%
+  head(10)
+```
+When I summarized the data we can see that 73% of the top 2000 anime are comedy anime while that is completely inaccurate. That is about 30% more than the actual percentage.
+
+```{r plotting both graphs together}
+grid.arrange(animegenreplot, kdramagenreplot)
+```
+
+I plotted both graphs together to see the differences between which genres are considered the 'best'. It was interesting to see that the top 3 genres for both TV show types are the same but in different orders. People generally perfer to watch comedy, action, and drama TV shows.
+
+```{r plotting the top 10 anime movies}
+animedata %>%
+  filter(Num_Episodes == 1) %>%
+  mutate(Name = fct_reorder(Name, desc(Score))) %>%
+  head(10) %>%
+  ggplot(aes(Name, Score)) +
+  geom_point() +
+  theme_bw() +
+  ggtitle('Top 10 Anime Movies') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme(axis.title.x = element_blank()) +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Next I was interested in plotting the scores of the top 10 anime movies by restricting the data frame to instances where there are only 1 episode. My all time favorite movie, 'Koe no Katachi' ( or 'A Silent Voice' in English), actually placed second on this list. As well as another great movie I've watched called 'Kimi no Na Wa' or 'Your Name' in English.
